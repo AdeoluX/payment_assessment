@@ -1,13 +1,18 @@
 import express, { NextFunction, Request, Response } from 'express'
 import { AppError, NotFoundError, ValidationError } from './error'
+import { paymentRoutes } from './routes/paymentRoutes'
 import { responder } from './responder'
+import { PaymentService } from './services/paymentService';
+import { PaymentRepository } from './domain/paymentRepository';
 
-export function createApp() {
+export function createApp(repo: PaymentRepository) {
     const app = express();
     app.use(express.json({ limit: '10kb' }))
     app.get('/health', (_req: Request, res: Response) => {
         res.json({ status: 'ok' })
     })
+
+    app.use('/payments', paymentRoutes(new PaymentService(repo)))
 
     app.use((_req: Request, _res: Response, next: NextFunction) => {
         next(new NotFoundError('Route not found'))

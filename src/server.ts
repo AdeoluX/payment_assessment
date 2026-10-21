@@ -1,8 +1,11 @@
 import { createApp } from './app'
+import { JsonPaymentRepo } from './repositories/jsonPaymentRepo'
 
 const PORT = Number(process.env.PORT) || 3000;
 
-const app = createApp();
+const repo = new JsonPaymentRepo(process.env.FILE_STORAGE || './data/payments.json')
+
+const app = createApp(repo);
 
 const server = app.listen(PORT, () => {
     console.log(`Payment service listening on port ${PORT}`);
