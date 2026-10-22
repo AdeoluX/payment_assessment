@@ -5,7 +5,7 @@ import { Payment, PaymentStatus } from '../domain/payment';
 import { PaymentRepository, CreatePaymentResult } from '../domain/paymentRepository';
 import { CreatePaymentDTO, UpdatePaymentChanges } from '../dtos';
 import { assertTransition } from '../domain/status';
-import { ConflictError, NotFoundError } from '../error';
+import { ConflictError, NotFoundError, ValidationError } from '../error';
 
 class PromiseQueue {
     private tail: Promise<unknown> = Promise.resolve();
@@ -73,8 +73,13 @@ export class JsonPaymentRepo implements PaymentRepository {
 
     private async persist(payments: Payment[]): Promise<void> {
         const tempPath = `${this.filePath}.${crypto.randomUUID()}.tmp`;
-        await fs.writeFile(tempPath, JSON.stringify(payments, null, 2), 'utf-8');
-        await fs.rename(tempPath, this.filePath);
+        try {
+            await fs.writeFile(tempPath, JSON.stringify(payments, null, 2), 'utf-8');
+            await fs.rename(tempPath, this.filePath);
+        } catch (err) {
+            await fs.rm(tempPath, { force: true }).catch(() => {});
+            throw err;
+        }
     }
 
     async create(data: CreatePaymentDTO): Promise<CreatePaymentResult> {
@@ -85,6 +90,16 @@ export class JsonPaymentRepo implements PaymentRepository {
             if (data.idempotencyKey) {
                 const existing = this.idempotencyIndex.get(data.idempotencyKey);
                 if (existing) {
+                    if (existing.amount !== data.amount || existing.currency !== data.currency) {
+                        throw new ConflictError(
+                            'Idempotency key already in use with different payment parameters',
+                            {
+                                idempotencyKey: data.idempotencyKey,
+                                expected: { amount: existing.amount, currency: existing.currency },
+                                received: { amount: data.amount, currency: data.currency },
+                            }
+                        );
+                    }
                     return { payment: existing, created: false };
                 }
             }
@@ -122,7 +137,9 @@ export class JsonPaymentRepo implements PaymentRepository {
 
     async findByStatus(status: PaymentStatus): Promise<Payment[]> {
         await this.ensureInitialized();
-        return Array.from(this.memoryStore.values()).filter(p => p.status === status);
+        return Array.from(this.memoryStore.values())
+            .filter(p => p.status === status)
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     }
 
     async update(id: string, expectedStatus: PaymentStatus, changes: UpdatePaymentChanges): Promise<Payment> {
@@ -145,13 +162,23 @@ export class JsonPaymentRepo implements PaymentRepository {
             // 2. State transition check: assert legal transition
             assertTransition(payment.status, changes.status);
 
-            // 3. Create updated immutable copy (do not mutate memoryStore yet)
+            // 3. Failure reason invariant: required on FAILED, forbidden on non-FAILED
+            const rawChanges = changes as { status: PaymentStatus; failureReason?: string };
+            if (rawChanges.status === 'FAILED') {
+                if (!rawChanges.failureReason || rawChanges.failureReason.trim() === '') {
+                    throw new ValidationError("failureReason is required when status is 'FAILED'");
+                }
+            } else if (rawChanges.failureReason !== undefined) {
+                throw new ValidationError(`failureReason cannot be set when status is '${rawChanges.status}'`);
+            }
+
+            // 4. Create updated immutable copy (do not mutate memoryStore yet)
             const now = new Date().toISOString();
             const updatedPayment: Payment = {
                 ...payment,
                 status: changes.status,
                 history: [...payment.history, { status: changes.status, at: now }],
-                failureReason: changes.failureReason !== undefined ? changes.failureReason : payment.failureReason,
+                failureReason: changes.status === 'FAILED' ? changes.failureReason : undefined,
                 updatedAt: now,
             };
 

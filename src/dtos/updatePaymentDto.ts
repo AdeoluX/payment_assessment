@@ -1,9 +1,8 @@
 import { PaymentStatus } from '../domain/payment';
 
-export interface UpdatePaymentChanges {
-    status: PaymentStatus;
-    failureReason?: string;
-}
+export type UpdatePaymentChanges =
+    | { status: 'FAILED'; failureReason: string }
+    | { status: Exclude<PaymentStatus, 'FAILED'>; failureReason?: never };
 
 export interface UpdatePaymentDTO {
     id: string;
