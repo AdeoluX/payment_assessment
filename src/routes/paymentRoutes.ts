@@ -1,10 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { PaymentService } from '../services/paymentService';
-import { paymentSchema, treeifyError } from '../schemas/paymentSchemas';
+import { paymentSchema, updateStatusSchema, treeifyError } from '../schemas/paymentSchemas';
 import { ValidationError } from '../error';
 import { responder } from '../responder';
+import { requireAdminAuth } from '../middleware/authMiddleware';
 
-export function paymentRoutes(paymentService: PaymentService): Router {
+export function paymentRoutes(paymentService: PaymentService, adminApiKey?: string): Router {
     const router = Router();
 
     router.post('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -34,6 +35,24 @@ export function paymentRoutes(paymentService: PaymentService): Router {
             next(err);
         }
     });
+
+    const handleUpdateStatus = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const parsed = updateStatusSchema.safeParse(req.body);
+            if (!parsed.success) {
+                throw new ValidationError('Invalid payload', treeifyError(parsed.error));
+            }
+
+            const updated = await paymentService.updateStatus(req.params.id as string, parsed.data);
+            return responder.ok(res, updated);
+        } catch (err) {
+            next(err);
+        }
+    };
+
+    const adminAuth = requireAdminAuth(adminApiKey);
+    router.patch('/:id/status', adminAuth, handleUpdateStatus);
+    router.put('/:id/status', adminAuth, handleUpdateStatus);
 
     return router;
 }

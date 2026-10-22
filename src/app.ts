@@ -5,14 +5,26 @@ import { responder } from './responder'
 import { PaymentService } from './services/paymentService';
 import { PaymentRepository } from './domain/paymentRepository';
 
-export function createApp(repo: PaymentRepository) {
+export function createApp(repo: PaymentRepository, adminApiKey?: string) {
     const app = express();
+    app.disable('x-powered-by');
     app.use(express.json({ limit: '10kb' }))
-    app.get('/health', (_req: Request, res: Response) => {
-        res.json({ status: 'ok' })
-    })
+    app.get('/health', async (_req: Request, res: Response) => {
+        const isReady = await repo.isReady();
+        if (!isReady) {
+            return res.status(503).json({
+                status: 'error',
+                store: 'unready',
+            });
+        }
 
-    app.use('/payments', paymentRoutes(new PaymentService(repo)))
+        return res.status(200).json({
+            status: 'ok',
+            store: 'ready',
+        });
+    });
+
+    app.use('/payments', paymentRoutes(new PaymentService(repo), adminApiKey))
 
     app.use((_req: Request, _res: Response, next: NextFunction) => {
         next(new NotFoundError('Route not found'))

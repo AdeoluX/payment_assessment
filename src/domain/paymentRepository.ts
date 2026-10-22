@@ -8,6 +8,7 @@ export interface CreatePaymentResult {
 
 export interface PaymentRepository {
     init(): Promise<void>;
+    isReady(): Promise<boolean>;
     create(data: CreatePaymentDTO): Promise<CreatePaymentResult>;
     findById(id: string): Promise<Payment | null>;
     findByStatus(status: PaymentStatus): Promise<Payment[]>;

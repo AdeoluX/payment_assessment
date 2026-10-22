@@ -5,6 +5,7 @@ import { Payment, PaymentStatus } from '../domain/payment';
 import { PaymentRepository, CreatePaymentResult } from '../domain/paymentRepository';
 import { CreatePaymentDTO, UpdatePaymentChanges } from '../dtos';
 import { assertTransition } from '../domain/status';
+import { storedPaymentsFileSchema, treeifyError } from '../schemas/paymentSchemas';
 import { ConflictError, NotFoundError, ValidationError } from '../error';
 
 class PromiseQueue {
@@ -43,6 +44,21 @@ export class JsonPaymentRepo implements PaymentRepository {
         await this.ensureInitialized();
     }
 
+    async isReady(): Promise<boolean> {
+        if (!this.isInitialized) return false;
+
+        try {
+            // Check read access to storage file
+            await fs.access(this.filePath, fs.constants.R_OK);
+            // Check write access to parent directory (required for atomic temp file creation and rename)
+            await fs.access(path.dirname(this.filePath), fs.constants.W_OK);
+            return true;
+        } catch (err) {
+            console.error('Storage readiness check failed:', err);
+            return false;
+        }
+    }
+
     private async ensureInitialized(): Promise<void> {
         if (this.isInitialized) return;
 
@@ -51,7 +67,24 @@ export class JsonPaymentRepo implements PaymentRepository {
 
         try {
             const raw = await fs.readFile(this.filePath, 'utf-8');
-            const payments: Payment[] = JSON.parse(raw);
+            let json: unknown;
+            try {
+                json = JSON.parse(raw);
+            } catch (syntaxErr: any) {
+                throw new Error(
+                    `Corrupted database file '${this.filePath}': invalid JSON syntax (${syntaxErr.message})`
+                );
+            }
+
+            const parseResult = storedPaymentsFileSchema.safeParse(json);
+            if (!parseResult.success) {
+                throw new Error(
+                    `Corrupted database file '${this.filePath}': schema validation failed: ` +
+                    JSON.stringify(treeifyError(parseResult.error))
+                );
+            }
+
+            const payments = parseResult.data as Payment[];
             this.memoryStore.clear();
             this.idempotencyIndex.clear();
             for (const payment of payments) {
