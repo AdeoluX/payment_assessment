@@ -33,3 +33,15 @@ export class UnauthorizedError extends AppError {
         super(401, 'UNAUTHORIZED', message, details);
     }
 }
+
+export class BadRequestError extends AppError {
+    constructor(message = 'Bad request', details?: unknown, code = 'BAD_REQUEST') {
+        super(400, code, message, details);
+    }
+}
+
+export class PayloadTooLargeError extends AppError {
+    constructor(message = 'Payload too large', details?: unknown) {
+        super(413, 'PAYLOAD_TOO_LARGE', message, details);
+    }
+}

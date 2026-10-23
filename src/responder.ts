@@ -31,10 +31,10 @@ export const responder = {
         return res.status(err.statusCode).json(body);
     },
 
-    internal(res: Response) {
+    internal(res: Response, message = 'Internal server error') {
         const body: ErrorBody = {
             success: false,
-            error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' },
+            error: { code: 'INTERNAL_ERROR', message },
         };
         return res.status(500).json(body);
     },

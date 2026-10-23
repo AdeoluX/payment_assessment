@@ -667,4 +667,61 @@ describe('Payments API Endpoints', () => {
             }
         });
     });
+
+    describe('Global Error Handling & Payload Limits', () => {
+        it('should return 400 Bad Request with consistent shape when given malformed JSON syntax ({bad)', async () => {
+            const res = await request(app)
+                .post('/payments')
+                .set('Content-Type', 'application/json')
+                .send('{bad');
+
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual({
+                success: false,
+                error: {
+                    code: 'INVALID_JSON',
+                    message: 'Invalid JSON syntax in request body',
+                },
+            });
+        });
+
+        it('should return 413 Payload Too Large with consistent shape when body exceeds 10 KB', async () => {
+            // Generate a payload exceeding 10 KB (10240 bytes)
+            const largeData = 'x'.repeat(12 * 1024);
+            const res = await request(app)
+                .post('/payments')
+                .set('Content-Type', 'application/json')
+                .send(`{ "amount": 100, "currency": "USD", "extra": "${largeData}" }`);
+
+            expect(res.status).toBe(413);
+            expect(res.body).toEqual({
+                success: false,
+                error: {
+                    code: 'PAYLOAD_TOO_LARGE',
+                    message: 'Payload too large. Maximum allowed size is 10kb.',
+                },
+            });
+        });
+
+        it('should return 500 Internal Server Error with consistent shape including success: false', async () => {
+            // Suppress console.error for expected 500 simulation
+            const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+            // Force repo.findById to throw an unexpected non-AppError
+            jest.spyOn(repo, 'findById').mockRejectedValueOnce(new Error('Unexpected disk read fault'));
+
+            const res = await request(app).get('/payments/non-existent-uuid');
+
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({
+                success: false,
+                error: {
+                    code: 'INTERNAL_ERROR',
+                    message: 'Internal server error',
+                },
+            });
+
+            consoleSpy.mockRestore();
+        });
+    });
 });

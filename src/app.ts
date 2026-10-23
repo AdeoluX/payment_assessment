@@ -1,5 +1,5 @@
 import express, { NextFunction, Request, Response } from 'express'
-import { AppError, NotFoundError, ValidationError } from './error'
+import { AppError, BadRequestError, NotFoundError, PayloadTooLargeError } from './error'
 import { paymentRoutes } from './routes/paymentRoutes'
 import { responder } from './responder'
 import { PaymentService } from './services/paymentService';
@@ -30,14 +30,33 @@ export function createApp(repo: PaymentRepository, adminApiKey?: string) {
         next(new NotFoundError('Route not found'))
     })
 
-    app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-        if (err instanceof AppError) return responder.fail(res, err)
-        console.error(err)
-        res.status(500).json({
-            error: {
-                code: 'INTERNAL_ERROR', message: 'Internal server error'
-            }
-        })
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+        if (err instanceof AppError) {
+            return responder.fail(res, err);
+        }
+
+        // Handle body-parser entity too large (payload > 10kb)
+        if (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413) {
+            return responder.fail(
+                res,
+                new PayloadTooLargeError('Payload too large. Maximum allowed size is 10kb.')
+            );
+        }
+
+        // Handle body-parser malformed JSON syntax errors (e.g., '{bad')
+        if (
+            (err instanceof SyntaxError && 'body' in err) ||
+            err.type === 'entity.parse.failed' ||
+            ((err.status === 400 || err.statusCode === 400) && err instanceof SyntaxError)
+        ) {
+            return responder.fail(
+                res,
+                new BadRequestError('Invalid JSON syntax in request body', undefined, 'INVALID_JSON')
+            );
+        }
+
+        console.error(err);
+        return responder.internal(res);
     })
 
     return app;
