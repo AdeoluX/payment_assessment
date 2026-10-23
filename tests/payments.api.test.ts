@@ -629,6 +629,31 @@ describe('Payments API Endpoints', () => {
             expect(cfg.fileStorage).toBe('./custom.json');
         });
 
+        it('should parse worker options from environment in loadConfig', () => {
+            const cfg = loadConfig({
+                ADMIN_API_KEY: 'valid-key',
+                WORKER_POLL_INTERVAL_MS: '2500',
+                WORKER_CONCURRENCY: '5',
+                WORKER_MAX_RETRIES: '4',
+                WORKER_INITIAL_RETRY_DELAY_MS: '150',
+                WORKER_RETRY_BACKOFF_FACTOR: '3',
+                WORKER_MAX_RETRY_DELAY_MS: '8000',
+                WORKER_ENABLE_JITTER: 'false',
+                WORKER_STALE_PROCESSING_TIMEOUT_MS: '60000',
+                WORKER_BANK_LATENCY_MS: '75',
+            });
+
+            expect(cfg.worker.pollIntervalMs).toBe(2500);
+            expect(cfg.worker.concurrency).toBe(5);
+            expect(cfg.worker.maxRetries).toBe(4);
+            expect(cfg.worker.initialRetryDelayMs).toBe(150);
+            expect(cfg.worker.retryBackoffFactor).toBe(3);
+            expect(cfg.worker.maxRetryDelayMs).toBe(8000);
+            expect(cfg.worker.enableJitter).toBe(false);
+            expect(cfg.worker.staleProcessingTimeoutMs).toBe(60000);
+            expect(cfg.worker.bankLatencyMs).toBe(75);
+        });
+
         it('should fail at startup if createApp is invoked without adminApiKey and process.env is unset', () => {
             const originalKey = process.env.ADMIN_API_KEY;
             delete process.env.ADMIN_API_KEY;
