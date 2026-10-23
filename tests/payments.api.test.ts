@@ -42,7 +42,10 @@ describe('Payments API Endpoints', () => {
             const res = await request(app).get('/health');
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'ok', store: 'ready' });
+            expect(res.body).toEqual({
+                success: true,
+                data: { status: 'ok', store: 'ready' },
+            });
             expect(res.headers['x-powered-by']).toBeUndefined();
         });
 
@@ -53,7 +56,9 @@ describe('Payments API Endpoints', () => {
             const res = await request(unreadyApp).get('/health');
 
             expect(res.status).toBe(503);
-            expect(res.body).toEqual({
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
+            expect(res.body.error.details).toEqual({
                 status: 'error',
                 store: 'unready',
             });
@@ -76,7 +81,9 @@ describe('Payments API Endpoints', () => {
             // Store is now unreachable and unwritable
             const res = await request(isolatedApp).get('/health');
             expect(res.status).toBe(503);
-            expect(res.body).toEqual({
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
+            expect(res.body.error.details).toEqual({
                 status: 'error',
                 store: 'unready',
             });
@@ -175,6 +182,19 @@ describe('Payments API Endpoints', () => {
             expect(res.status).toBe(400);
             expect(res.body.success).toBe(false);
             expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        });
+
+        it('should return 400 Bad Request with clear message when integer exceeds safe range', async () => {
+            const res = await request(app)
+                .post('/payments')
+                .send({ amount: 1e21, currency: 'USD' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+            const detailsStr = JSON.stringify(res.body.error.details);
+            expect(detailsStr).toContain('Amount is too large to store exactly');
+            expect(detailsStr).not.toContain('no decimals');
         });
 
         it('should return 400 Bad Request on negative amount', async () => {

@@ -24,10 +24,29 @@ export const ISO_4217_CURRENCY_CODES = [
 export const ISO_CURRENCY_SET = new Set<string>(ISO_4217_CURRENCY_CODES);
 
 export const paymentSchema = z.object({
-    amount: z
-        .number()
-        .int('Amount must be an integer in minor units (no decimals)')
-        .positive('Amount must be greater than 0'),
+    amount: z.number().superRefine((val, ctx) => {
+        if (val <= 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Amount must be greater than 0',
+            });
+            return;
+        }
+        if (val > Number.MAX_SAFE_INTEGER || (!Number.isSafeInteger(val) && Number.isInteger(val))) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Amount is too large to store exactly (exceeds MAX_SAFE_INTEGER)',
+            });
+            return;
+        }
+        if (!Number.isInteger(val)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Amount must be an integer in minor units (no decimals)',
+            });
+            return;
+        }
+    }),
     currency: z
         .string()
         .trim()

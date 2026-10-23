@@ -1,8 +1,8 @@
 # Payment Assessment Service
 
-A resilient, production-ready asynchronous payment processing service built with **Node.js**, **Express**, **TypeScript**, and **Zod**.
+A resilient asynchronous payment processing service built with **Node.js**, **Express**, **TypeScript**, and **Zod** as an assessment prototype.
 
-The system decouples fast HTTP payment ingestion from asynchronous downstream bank execution. It features atomic storage persistence, optimistic concurrency control, an asynchronous background worker with exponential backoff and full jitter, two-phase startup reconciliation to prevent double-charging, and constant-time timing-safe administrative authentication.
+The system decouples fast HTTP payment ingestion from asynchronous downstream bank execution. It features atomic storage persistence, optimistic concurrency control, an asynchronous background worker with exponential backoff and full jitter, two-phase startup reconciliation to mitigate double-charging, and constant-time timing-safe administrative authentication.
 
 ---
 
@@ -10,11 +10,18 @@ The system decouples fast HTTP payment ingestion from asynchronous downstream ba
 
 ### Architecture Overview
 1. **HTTP Ingestion (`POST /payments`)**: Clients create payment requests. Requests are validated with Zod, assigned an immutable UUID, stamped with `PENDING` status, and written to durable storage before returning immediately.
-2. **Background Execution (`PaymentWorker`)**: An independent worker process polls for `PENDING` payments, claims them atomically (`PENDING` $\rightarrow$ `PROCESSING`) using optimistic concurrency, and communicates with a bank gateway.
+2. **Background Execution (`PaymentWorker`)**: An asynchronous worker polls for `PENDING` payments, claims them atomically (`PENDING` $\rightarrow$ `PROCESSING`) using optimistic concurrency, and communicates with a bank gateway.
 3. **Resilience & Retries**:
    - **Transient errors** (network timeouts, gateway 503s) trigger exponential backoff with full jitter up to `WORKER_MAX_RETRIES`.
    - **Terminal failures** (insufficient funds, expired cards) short-circuit immediately without wasting retries or sleeping.
-4. **Crash Recovery**: On reboot, stranded `PROCESSING` payments undergo two-phase reconciliation: the worker queries the bank first via the idempotency key (`inquire`) to verify if the charge was previously captured, preventing duplicate charges.
+4. **Crash Recovery**: On reboot, stranded `PROCESSING` payments undergo two-phase reconciliation: the worker queries the bank first via the idempotency key (`inquire`) to verify if the charge was previously captured before retrying.
+
+### How the Worker Runs
+The background worker (`PaymentWorker`) runs directly inside the same Node.js process as the Express API server:
+- **In-Process Lifecycle**: In [`src/server.ts`](src/server.ts), during the bootstrap phase, `worker.start()` is invoked before `app.listen()` binds the HTTP port.
+- **Startup Recovery**: On start, the worker first executes a recovery sweep for any `PROCESSING` payments that were left stranded by an unexpected shutdown or crash, querying the bank gateway (`inquire`) to reconcile state before charging.
+- **Event-Driven Polling**: The worker then schedules a recursive timer-based polling loop (`scheduleNextPoll`) to query `JsonPaymentRepo` for `PENDING` records at intervals defined by `WORKER_POLL_INTERVAL_MS`, adhering to `WORKER_CONCURRENCY` limits.
+- **Graceful Shutdown**: When `server.ts` receives termination signals (`SIGTERM` / `SIGINT`), it coordinates two-phase teardown: first stopping incoming HTTP traffic via `server.close()`, then awaiting `worker.stop()` to drain active in-flight bank requests and abort sleep timers.
 
 ### Prerequisites
 - **Node.js**: `v18.0.0` or higher
@@ -34,7 +41,7 @@ npm install
 # 2. Set the required admin API key
 export ADMIN_API_KEY="super-secret-admin-key-12345"
 
-# 3. Start development server (with ts-node-dev hot reload)
+# 3. Start development server (with tsx watch hot reload)
 npm run dev
 
 # Or build and run in production mode
@@ -46,7 +53,7 @@ npm start
 
 ## 2. Configuration Table
 
-All options are configurable via environment variables and parsed in [`src/config.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/src/config.ts):
+All options are configurable via environment variables and parsed in [`src/config.ts`](src/config.ts):
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
@@ -93,7 +100,7 @@ All `/payments` endpoints return responses enclosed in a strict, uniform JSON en
 ---
 
 ### 1. Storage & Liveness Health Check
-Inspects file accessibility and directory write permissions required for atomic renames.
+Inspects file accessibility and directory write permissions required for atomic renames, returning standard `{ success, data }` envelopes.
 
 ```bash
 curl -i -X GET http://localhost:3000/health
@@ -102,12 +109,15 @@ curl -i -X GET http://localhost:3000/health
 **Response (`200 OK`):**
 ```json
 {
-  "status": "ok",
-  "store": "ready"
+  "success": true,
+  "data": {
+    "status": "ok",
+    "store": "ready"
+  }
 }
 ```
 
-*(If storage is unmounted or read-only, returns `503 Service Unavailable` with `{"status": "error", "store": "unready"}`)*
+*(If storage is unmounted or read-only, returns `503 Service Unavailable` with `{"success": false, "error": {"code": "SERVICE_UNAVAILABLE", "message": "Storage is unready or unwritable", "details": {"status": "error", "store": "unready"}}}`)*
 
 ---
 
@@ -302,7 +312,7 @@ When the worker starts, it searches for stranded `PROCESSING` payments from a pr
 
 | Failure Scenario | How the System Handles It | Guarantees & Recovery |
 |---|---|---|
-| **Process crash while charging bank** | On startup, worker queries `bankGateway.inquire()` using payment ID. | **No double-charging**: reconciles directly to `SUCCESS` if bank processed it, or resumes processing if uncaptured. |
+| **Process crash while charging bank** | On startup, worker queries `bankGateway.inquire()` using payment ID. | Reconciles to `SUCCESS` if upstream bank recorded capture; note that the mock bank ledger is in-memory and resets on process restart (see Known Limitations). |
 | **Transient bank error (timeout, 503)** | Worker identifies `isRetryable: true`, computes exponential backoff with full jitter, sleeps, and retries. | Prevents overwhelming upstream gateway; retries up to `WORKER_MAX_RETRIES` before marking `FAILED`. |
 | **Terminal bank failure (insufficient funds, card expired)** | Gateway returns `isRetryable: false`. Worker immediately breaks out of retry loop. | **Zero wasted retries, never sleeps**: Marks payment `FAILED` immediately with specific bank reason. |
 | **Concurrent workers polling same payment** | Conditional atomic update (`PENDING` $\rightarrow$ `PROCESSING`). | Exactly one worker succeeds; losing workers catch `ConflictError` and skip without charging. |
@@ -316,7 +326,7 @@ When the worker starts, it searches for stranded `PROCESSING` payments from a pr
 
 ## 6. Testing
 
-The project maintains **100% test pass rate across 101 automated tests** covering unit, integration, and end-to-end scenarios.
+The project includes an automated test suite across **102 tests** covering unit, integration, and end-to-end scenarios.
 
 ```bash
 # Run the entire test suite
@@ -333,16 +343,27 @@ npx tsc --noEmit
 ```
 
 ### Test Suite Breakdown:
-- [`tests/status.test.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/tests/status.test.ts): State machine DAG validation, legal vs illegal transitions, terminal state immutability.
-- [`tests/jsonPaymentRepo.test.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/tests/jsonPaymentRepo.test.ts): Atomic file writes, idempotency enforcement, optimistic concurrency conflict handling, corruption fail-fast.
-- [`tests/payments.api.test.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/tests/payments.api.test.ts): End-to-end HTTP tests, Zod validation errors, timing-safe authentication, health check readiness probe.
-- [`tests/paymentWorker.test.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/tests/paymentWorker.test.ts): Background processing, concurrency limits, startup recovery & bank inquiry reconciliation, exponential backoff with full jitter, terminal error zero-sleep short-circuiting, multi-worker race conditions, and transient failure retries (2 sleeps, 3 charges).
+- [`tests/status.test.ts`](tests/status.test.ts): State machine DAG validation, legal vs illegal transitions, terminal state immutability.
+- [`tests/jsonPaymentRepo.test.ts`](tests/jsonPaymentRepo.test.ts): Atomic file writes, idempotency enforcement, optimistic concurrency conflict handling, corruption fail-fast.
+- [`tests/payments.api.test.ts`](tests/payments.api.test.ts): End-to-end HTTP tests, Zod validation errors, timing-safe authentication, health check readiness probe.
+- [`tests/paymentWorker.test.ts`](tests/paymentWorker.test.ts): Background processing, concurrency limits, startup recovery & bank inquiry reconciliation, exponential backoff with full jitter, terminal error zero-sleep short-circuiting, multi-worker race conditions, and transient failure retries (2 sleeps, 3 charges).
 
 ---
 
-## 7. Limitations & Production Path
+## 7. Known Limitations & Production Path
 
-While this implementation is robust, production cloud environments require additional scaling patterns:
+### Known Limitations
+1. **In-Memory Mock Bank Ledger**:
+   - The bundled mock bank gateway stores transaction history in an in-memory `Map`. In this prototype, restarting the server process resets this mock bank ledger. Consequently, startup inquiry (`inquire()`) cannot discover charges captured before the restart unless backed by an external or persistent bank ledger.
+2. **Admin `PROCESSING` Transition Stranding**:
+   - If an administrator manually changes a payment status from `PENDING` to `PROCESSING` via `PATCH /payments/:id/status`, the running background worker will not process it (as its polling query only selects `PENDING` records). The payment remains stranded until the service restarts, at which point startup reconciliation sweeps orphaned `PROCESSING` payments.
+3. **Embedded In-Process Worker**:
+   - The background worker runs in the same Node.js event loop as the Express API server. Under sustained heavy load, intensive polling or processing shares CPU cycles with incoming HTTP request handling.
+4. **Single-Node JSON Flat File Storage**:
+   - While atomic temp-file renames and the in-process Promise Queue prevent race conditions and corrupted writes on a single host, local file storage does not support distributed horizontal scaling across multiple servers without a networked transactional database.
+
+### Production Path
+While this prototype is resilient and thoroughly tested, production cloud environments require additional scaling patterns:
 
 1. **Storage Layer**:
    - *Current*: Local JSON file storage with POSIX atomic renames and in-memory indexes.
@@ -357,7 +378,7 @@ While this implementation is robust, production cloud environments require addit
    - *Current*: Single static `ADMIN_API_KEY` environment variable.
    - *Production*: Integrate OAuth2/OIDC, JWT tokens with RBAC (Role-Based Access Control), rate-limiting per API key, and automated secret rotation (AWS Secrets Manager, HashiCorp Vault).
 5. **Observability & Distributed Tracing**:
-   - *Current*: Structured worker telemetry events emitted to stdout.
+   - *Current*: HTTP request logging middleware and structured worker event logs to stdout.
    - *Production*: Instrument OpenTelemetry traces propagating across HTTP requests and bank RPC calls, with Prometheus metrics (`payment_duration_seconds`, `retry_attempts_total`).
 
 ---

@@ -101,6 +101,12 @@ export class PaymentWorker {
         this.state = 'RUNNING';
         this.abortController = new AbortController();
 
+        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG_WORKER) {
+            console.log(
+                `[${new Date().toISOString()}] [PaymentWorker] Started (workerId: ${this.workerId}, pollInterval: ${this.pollIntervalMs}ms, concurrency: ${this.concurrency}, maxRetries: ${this.maxRetries})`
+            );
+        }
+
         // Run startup recovery as background tracked jobs in activeJobs that don't block start()
         this.triggerStartupRecovery();
 
@@ -145,6 +151,10 @@ export class PaymentWorker {
         }
 
         this.state = 'STOPPED';
+
+        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG_WORKER) {
+            console.log(`[${new Date().toISOString()}] [PaymentWorker] Stopped (workerId: ${this.workerId})`);
+        }
     }
 
     /**
@@ -438,9 +448,10 @@ export class PaymentWorker {
             workerId: this.workerId,
             ...event,
         };
-        // Can be routed to Datadog/CloudWatch/Winston; output clean structured logs
-        if (process.env.DEBUG_WORKER) {
-            console.log(`[PaymentWorker][${telemetry.type}] ${telemetry.paymentId}:`, telemetry);
+        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG_WORKER) {
+            const attemptStr = event.attempt !== undefined ? ` [attempt ${event.attempt}]` : '';
+            const detailsStr = event.details ? ` ${JSON.stringify(event.details)}` : '';
+            console.log(`[${telemetry.timestamp}] [PaymentWorker] [${telemetry.type}] ${telemetry.paymentId}${attemptStr}${detailsStr}`);
         }
     }
 }

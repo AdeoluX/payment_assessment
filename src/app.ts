@@ -4,23 +4,36 @@ import { paymentRoutes } from './routes/paymentRoutes'
 import { responder } from './responder'
 import { PaymentService } from './services/paymentService';
 import { PaymentRepository } from './domain/paymentRepository';
+import { requestLogger } from './middleware/requestLogger';
+import { logger } from './logger';
 
 export function createApp(repo: PaymentRepository, adminApiKey?: string) {
     const app = express();
     app.disable('x-powered-by');
+    app.use(requestLogger);
     app.use(express.json({ limit: '10kb' }))
     app.get('/health', async (_req: Request, res: Response) => {
         const isReady = await repo.isReady();
         if (!isReady) {
             return res.status(503).json({
-                status: 'error',
-                store: 'unready',
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: 'Storage is unready or unwritable',
+                    details: {
+                        status: 'error',
+                        store: 'unready',
+                    },
+                },
             });
         }
 
         return res.status(200).json({
-            status: 'ok',
-            store: 'ready',
+            success: true,
+            data: {
+                status: 'ok',
+                store: 'ready',
+            },
         });
     });
 
@@ -55,7 +68,7 @@ export function createApp(repo: PaymentRepository, adminApiKey?: string) {
             );
         }
 
-        console.error(err);
+        logger.error('Unhandled internal server error', err);
         return responder.internal(res);
     })
 
