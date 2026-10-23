@@ -1,6 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { PaymentService } from '../services/paymentService';
-import { paymentSchema, updateStatusSchema, treeifyError } from '../schemas/paymentSchemas';
+import {
+    paymentSchema,
+    updateStatusSchema,
+    idempotencyKeySchema,
+    treeifyError,
+} from '../schemas/paymentSchemas';
 import { ValidationError } from '../error';
 import { responder } from '../responder';
 import { requireAdminAuth } from '../middleware/authMiddleware';
@@ -15,7 +20,23 @@ export function paymentRoutes(paymentService: PaymentService, adminApiKey?: stri
                 throw new ValidationError('Invalid payload', treeifyError(parsed.error));
             }
 
-            const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+            const rawIdempotencyKey = req.headers['idempotency-key'];
+            let idempotencyKey: string | undefined;
+
+            if (rawIdempotencyKey !== undefined) {
+                if (Array.isArray(rawIdempotencyKey)) {
+                    throw new ValidationError('Multiple Idempotency-Key headers are not allowed');
+                }
+                const parsedKey = idempotencyKeySchema.safeParse(rawIdempotencyKey);
+                if (!parsedKey.success) {
+                    throw new ValidationError(
+                        'Invalid Idempotency-Key header',
+                        treeifyError(parsedKey.error)
+                    );
+                }
+                idempotencyKey = parsedKey.data;
+            }
+
             const result = await paymentService.create(parsed.data, idempotencyKey);
 
             if (result.created) {

@@ -196,6 +196,70 @@ describe('Payments API Endpoints', () => {
             expect(res.body.success).toBe(false);
             expect(res.body.error.code).toBe('VALIDATION_ERROR');
         });
+
+        it('should return 400 Bad Request if currency does not consist of 3 alphabetical letters', async () => {
+            const numRes = await request(app)
+                .post('/payments')
+                .send({ amount: 1000, currency: '123' });
+
+            expect(numRes.status).toBe(400);
+            expect(numRes.body.success).toBe(false);
+            expect(numRes.body.error.code).toBe('VALIDATION_ERROR');
+
+            const symRes = await request(app)
+                .post('/payments')
+                .send({ amount: 1000, currency: '$%^' });
+
+            expect(symRes.status).toBe(400);
+            expect(symRes.body.success).toBe(false);
+            expect(symRes.body.error.code).toBe('VALIDATION_ERROR');
+        });
+
+        it('should return 400 Bad Request if currency is 3 letters but not a recognized ISO 4217 currency code', async () => {
+            const res = await request(app)
+                .post('/payments')
+                .send({ amount: 1000, currency: 'ZZZ' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+            expect(res.body.error.details).toBeDefined();
+        });
+
+        it('should return 400 Bad Request if Idempotency-Key header exceeds 255 characters (e.g. 5000 characters)', async () => {
+            const excessivelyLongKey = 'k'.repeat(5000);
+            const res = await request(app)
+                .post('/payments')
+                .set('Idempotency-Key', excessivelyLongKey)
+                .send({ amount: 2000, currency: 'USD' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+            expect(res.body.error.message).toMatch(/Idempotency-Key/i);
+        });
+
+        it('should return 400 Bad Request if Idempotency-Key header is empty or pure whitespace', async () => {
+            const res = await request(app)
+                .post('/payments')
+                .set('Idempotency-Key', '   ')
+                .send({ amount: 2000, currency: 'USD' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        });
+
+        it('should return 400 Bad Request if Idempotency-Key header contains internal whitespace or spaces', async () => {
+            const res = await request(app)
+                .post('/payments')
+                .set('Idempotency-Key', 'invalid key with spaces')
+                .send({ amount: 2000, currency: 'USD' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        });
     });
 
     describe('GET /payments/:id', () => {

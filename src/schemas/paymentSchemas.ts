@@ -1,5 +1,28 @@
 import { z } from 'zod';
 
+export const ISO_4217_CURRENCY_CODES = [
+    'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN',
+    'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BOV',
+    'BRL', 'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CAD', 'CDF', 'CHE', 'CHF',
+    'CHW', 'CLF', 'CLP', 'CNY', 'COP', 'COU', 'CRC', 'CUC', 'CUP', 'CVE',
+    'CZK', 'DJF', 'DKK', 'DOP', 'DZD', 'EGP', 'ERN', 'ETB', 'EUR', 'FJD',
+    'FKP', 'GBP', 'GEL', 'GHS', 'GIP', 'GMD', 'GNF', 'GTQ', 'GYD', 'HKD',
+    'HNL', 'HRK', 'HTG', 'HUF', 'IDR', 'ILS', 'INR', 'IQD', 'IRR', 'ISK',
+    'JMD', 'JOD', 'JPY', 'KES', 'KGS', 'KHR', 'KMF', 'KPW', 'KRW', 'KWD',
+    'KYD', 'KZT', 'LAK', 'LBP', 'LKR', 'LRD', 'LSL', 'LYD', 'MAD', 'MDL',
+    'MGA', 'MKD', 'MMK', 'MNT', 'MOP', 'MRU', 'MUR', 'MVR', 'MWK', 'MXN',
+    'MXV', 'MYR', 'MZN', 'NAD', 'NGN', 'NIO', 'NOK', 'NPR', 'NZD', 'OMR',
+    'PAB', 'PEN', 'PGK', 'PHP', 'PKR', 'PLN', 'PYG', 'QAR', 'RON', 'RSD',
+    'RUB', 'RWF', 'SAR', 'SBD', 'SCR', 'SDG', 'SEK', 'SGD', 'SHP', 'SLL',
+    'SLE', 'SOS', 'SRD', 'SSP', 'STN', 'SVC', 'SYP', 'SZL', 'THB', 'TJS',
+    'TMT', 'TND', 'TOP', 'TRY', 'TTD', 'TWD', 'TZS', 'UAH', 'UGX', 'USD',
+    'USN', 'UYI', 'UYU', 'UYW', 'UZS', 'VED', 'VES', 'VND', 'VUV', 'WST',
+    'XAF', 'XCD', 'XDR', 'XOF', 'XPF', 'XSU', 'XUA', 'YER', 'ZAR', 'ZMW',
+    'ZWL',
+] as const;
+
+export const ISO_CURRENCY_SET = new Set<string>(ISO_4217_CURRENCY_CODES);
+
 export const paymentSchema = z.object({
     amount: z
         .number()
@@ -8,9 +31,19 @@ export const paymentSchema = z.object({
     currency: z
         .string()
         .trim()
-        .length(3, 'Currency must be a 3-letter ISO code')
-        .toUpperCase(),
+        .regex(/^[A-Za-z]{3}$/, 'Currency must consist of exactly 3 alphabetical letters')
+        .transform((val) => val.toUpperCase())
+        .refine((val) => ISO_CURRENCY_SET.has(val), {
+            message: 'Currency must be a valid ISO 4217 currency code (e.g., NGN, USD, EUR, GBP)',
+        }),
 });
+
+export const idempotencyKeySchema = z
+    .string()
+    .trim()
+    .min(1, 'Idempotency-Key cannot be empty')
+    .max(255, 'Idempotency-Key must not exceed 255 characters')
+    .regex(/^[\x21-\x7E]+$/, 'Idempotency-Key must contain only printable ASCII characters without spaces');
 
 export type PaymentInput = z.infer<typeof paymentSchema>;
 
@@ -24,8 +57,14 @@ export const statusEntrySchema = z.object({
 export const storedPaymentSchema = z.object({
     id: z.string().min(1, 'Payment id is required'),
     amount: z.number().int().positive('Amount must be positive integer'),
-    currency: z.string().length(3, 'Currency must be 3 characters'),
-    idempotencyKey: z.string().optional(),
+    currency: z
+        .string()
+        .regex(/^[A-Za-z]{3}$/, 'Currency must consist of exactly 3 alphabetical letters')
+        .transform((val) => val.toUpperCase())
+        .refine((val) => ISO_CURRENCY_SET.has(val), {
+            message: 'Currency must be a valid ISO 4217 currency code',
+        }),
+    idempotencyKey: z.string().max(255).optional(),
     status: paymentStatusSchema,
     failureReason: z.string().optional(),
     history: z.array(statusEntrySchema).min(1, 'History must have at least one entry'),

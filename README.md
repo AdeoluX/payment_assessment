@@ -86,7 +86,7 @@ curl -i -X GET http://localhost:3000/health
 ---
 
 ### 2. Create Payment
-Creates a payment in `PENDING` state. Amounts must be positive integers in minor units (e.g., cents, pence, kobo) with a valid 3-letter ISO-4217 currency code. Supports optional client idempotency keys.
+Creates a payment in `PENDING` state. Amounts must be positive integers in minor units (e.g., cents, pence, kobo) with a valid 3-letter alphabetical ISO-4217 currency code (e.g. `USD`, `NGN`, `EUR`, `GBP`). Supports optional client idempotency keys (1–255 printable ASCII characters without spaces).
 
 ```bash
 curl -i -X POST http://localhost:3000/payments \
@@ -225,7 +225,7 @@ When the worker starts, it searches for stranded `PROCESSING` payments from a pr
 
 ## 6. Testing
 
-The project maintains **100% test pass rate across 93 automated tests** covering unit, integration, and end-to-end scenarios.
+The project maintains **100% test pass rate across 101 automated tests** covering unit, integration, and end-to-end scenarios.
 
 ```bash
 # Run the entire test suite
