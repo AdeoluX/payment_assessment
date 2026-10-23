@@ -68,6 +68,30 @@ All options are configurable via environment variables and parsed in [`src/confi
 
 ## 3. API Reference & `curl` Examples
 
+### Unified Response Format
+All `/payments` endpoints return responses enclosed in a strict, uniform JSON envelope:
+
+- **Success (`200 OK` / `201 Created`)**:
+  ```json
+  {
+    "success": true,
+    "data": { ... }
+  }
+  ```
+- **Error (`400`, `401`, `404`, `409`, `413`, `500`)**:
+  ```json
+  {
+    "success": false,
+    "error": {
+      "code": "ERROR_CODE",
+      "message": "Human-readable explanation",
+      "details": "..."
+    }
+  }
+  ```
+
+---
+
 ### 1. Storage & Liveness Health Check
 Inspects file accessibility and directory write permissions required for atomic renames.
 
@@ -82,6 +106,8 @@ curl -i -X GET http://localhost:3000/health
   "store": "ready"
 }
 ```
+
+*(If storage is unmounted or read-only, returns `503 Service Unavailable` with `{"status": "error", "store": "unready"}`)*
 
 ---
 
@@ -101,20 +127,23 @@ curl -i -X POST http://localhost:3000/payments \
 **Response (`201 Created` on first submission):**
 ```json
 {
-  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "amount": 5000,
-  "currency": "USD",
-  "idempotencyKey": "client-txn-88319",
-  "status": "PENDING",
-  "history": [
-    { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" }
-  ],
-  "createdAt": "2026-10-22T21:40:00.123Z",
-  "updatedAt": "2026-10-22T21:40:00.123Z"
+  "success": true,
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "amount": 5000,
+    "currency": "USD",
+    "idempotencyKey": "client-txn-88319",
+    "status": "PENDING",
+    "history": [
+      { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" }
+    ],
+    "createdAt": "2026-10-22T21:40:00.123Z",
+    "updatedAt": "2026-10-22T21:40:00.123Z"
+  }
 }
 ```
 
-*Note: Resubmitting the same request with the same `Idempotency-Key` returns `200 OK` with the existing payment record. Resubmitting with the same key but different `amount` or `currency` returns `409 Conflict`.*
+*Note: Resubmitting the same request with the same `Idempotency-Key` returns `200 OK` with the existing payment record inside the `{ "success": true, "data": { ... } }` envelope. Resubmitting with the same key but different `amount` or `currency` returns `409 Conflict`.*
 
 ---
 
@@ -128,26 +157,31 @@ curl -i -X GET http://localhost:3000/payments/7c9e6679-7425-40de-944b-e07fc1f90a
 **Response (`200 OK`):**
 ```json
 {
-  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "amount": 5000,
-  "currency": "USD",
-  "idempotencyKey": "client-txn-88319",
-  "status": "SUCCESS",
-  "history": [
-    { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" },
-    { "status": "PROCESSING", "at": "2026-10-22T21:40:01.050Z" },
-    { "status": "SUCCESS", "at": "2026-10-22T21:40:01.120Z" }
-  ],
-  "createdAt": "2026-10-22T21:40:00.123Z",
-  "updatedAt": "2026-10-22T21:40:01.120Z"
+  "success": true,
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "amount": 5000,
+    "currency": "USD",
+    "idempotencyKey": "client-txn-88319",
+    "status": "SUCCESS",
+    "history": [
+      { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" },
+      { "status": "PROCESSING", "at": "2026-10-22T21:40:01.050Z" },
+      { "status": "SUCCESS", "at": "2026-10-22T21:40:01.120Z" }
+    ],
+    "createdAt": "2026-10-22T21:40:00.123Z",
+    "updatedAt": "2026-10-22T21:40:01.120Z"
+  }
 }
 ```
+
+*(If the payment ID does not exist, returns `404 Not Found` with `{"success": false, "error": {"code": "NOT_FOUND", "message": "Payment ... not found"}}`)*
 
 ---
 
 ### 4. Update Payment Status (Admin Only)
 Allows administrators to manually advance or resolve payment status.
-- **Requires header**: `X-Admin-Api-Key: <ADMIN_API_KEY>` (verified using timing-safe SHA-256 HMAC comparisons).
+- **Requires header**: `X-Admin-Api-Key: <ADMIN_API_KEY>` (verified using timing-safe SHA-256 comparisons).
 - **Enforces strict transition DAG**: `PENDING` $\rightarrow$ `PROCESSING` $\rightarrow$ `SUCCESS` | `FAILED`. Terminal states cannot be altered.
 - **Invariants**: `failureReason` is required when setting `FAILED`, and forbidden when setting `SUCCESS`.
 - **Optimistic Concurrency**: Provide `"expectedStatus"` to guarantee no race conditions with active background workers.
@@ -163,6 +197,26 @@ curl -i -X PATCH http://localhost:3000/payments/7c9e6679-7425-40de-944b-e07fc1f9
   }'
 ```
 
+**Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "amount": 5000,
+    "currency": "USD",
+    "status": "SUCCESS",
+    "history": [
+      { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" },
+      { "status": "PROCESSING", "at": "2026-10-22T21:40:01.050Z" },
+      { "status": "SUCCESS", "at": "2026-10-22T21:40:02.400Z" }
+    ],
+    "createdAt": "2026-10-22T21:40:00.123Z",
+    "updatedAt": "2026-10-22T21:40:02.400Z"
+  }
+}
+```
+
 #### Example B: Admin Marks Payment as `FAILED`
 ```bash
 curl -i -X PATCH http://localhost:3000/payments/7c9e6679-7425-40de-944b-e07fc1f90ae7/status \
@@ -174,6 +228,43 @@ curl -i -X PATCH http://localhost:3000/payments/7c9e6679-7425-40de-944b-e07fc1f9
     "failureReason": "Manual admin dispute void"
   }'
 ```
+
+**Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "amount": 5000,
+    "currency": "USD",
+    "status": "FAILED",
+    "failureReason": "Manual admin dispute void",
+    "history": [
+      { "status": "PENDING", "at": "2026-10-22T21:40:00.123Z" },
+      { "status": "PROCESSING", "at": "2026-10-22T21:40:01.050Z" },
+      { "status": "FAILED", "at": "2026-10-22T21:40:02.400Z" }
+    ],
+    "createdAt": "2026-10-22T21:40:00.123Z",
+    "updatedAt": "2026-10-22T21:40:02.400Z"
+  }
+}
+```
+
+---
+
+### 5. Standard Error Responses
+All errors across the entire API follow a consistent schema with `"success": false`:
+
+| HTTP Status | Error Code (`error.code`) | Trigger Condition | Example Response |
+|---|---|---|---|
+| **`400 Bad Request`** | `VALIDATION_ERROR` | Amount $\le 0$, non-integer amounts, unsupported currency codes, invalid `Idempotency-Key` headers | `{"success": false, "error": {"code": "VALIDATION_ERROR", "message": "Invalid payload", "details": ...}}` |
+| **`400 Bad Request`** | `INVALID_JSON` | Malformed JSON payload (e.g. `{bad`) | `{"success": false, "error": {"code": "INVALID_JSON", "message": "Invalid JSON syntax in request body"}}` |
+| **`401 Unauthorized`** | `UNAUTHORIZED` | Missing or incorrect `X-Admin-Api-Key` on `/payments/:id/status` | `{"success": false, "error": {"code": "UNAUTHORIZED", "message": "Invalid or missing X-Admin-Api-Key"}}` |
+| **`404 Not Found`** | `NOT_FOUND` | Unknown route or payment ID not found | `{"success": false, "error": {"code": "NOT_FOUND", "message": "Payment ... not found"}}` |
+| **`409 Conflict`** | `CONFLICT` | Idempotency key reused with mismatched payload or invalid status transition | `{"success": false, "error": {"code": "CONFLICT", "message": "Idempotency key conflict: ..."}}` |
+| **`413 Payload Too Large`** | `PAYLOAD_TOO_LARGE` | Request body exceeds 10 KB limit | `{"success": false, "error": {"code": "PAYLOAD_TOO_LARGE", "message": "Payload too large. Maximum allowed size is 10kb."}}` |
+| **`500 Internal Error`** | `INTERNAL_ERROR` | Unexpected server error or disk fault | `{"success": false, "error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}}` |
+
 
 ---
 

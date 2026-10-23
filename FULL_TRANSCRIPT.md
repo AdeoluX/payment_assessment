@@ -1,7 +1,7 @@
 # Full Conversation Transcript
 
 - **Conversation ID**: `20a53e58-75c4-4d4c-a52d-2fa9c5b69b1a`
-- **Generated At**: 2026-10-23T12:37:43.696Z
+- **Generated At**: 2026-10-23T12:46:31.943Z
 - **Raw JSONL Log**: [FULL_TRANSCRIPT.jsonl](./FULL_TRANSCRIPT.jsonl)
 
 ---
@@ -6885,4 +6885,117 @@ Also The Idempotency-Key header isn't checked character length is not 5000 is ac
 > 🛠️ *Actions taken (Step 1269):* `replace_file_content`
 
 > 🛠️ *Actions taken (Step 1271):* `run_command`
+
+> 🛠️ *Actions taken (Step 1273):* `run_command`
+
+> 🛠️ *Actions taken (Step 1275):* `run_command`
+
+
+### 🤖 Antigravity Assistant (Step 1277)
+*Time: 2026-10-23T12:38:07Z*
+
+Both improvements have been implemented, tested with new automated test cases, and pushed to GitHub:
+
+### 1. Strict 3-Letter ISO-4217 Currency Validation
+- **Previous behavior**: Accepted any 3-character string, allowing numeric values (e.g., `"123"`), special characters (`"$%^"`), or fictitious codes (`"ZZZ"`).
+- **New behavior in [`src/schemas/paymentSchemas.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/src/schemas/paymentSchemas.ts#L30-L38)**:
+  - Enforces exactly 3 alphabetical letters via `/^[A-Za-z]{3}$/`.
+  - Normalizes to uppercase.
+  - Whitelists against the standard **ISO-4217 Currency Register** (`ISO_CURRENCY_SET`), including major global currencies (`USD`, `EUR`, `GBP`, `CAD`, `JPY`) and regional currencies (`NGN`, `GHS`, `KES`, `ZAR`, etc.).
+  - Rejects unrecognized or non-letter codes with `400 Bad Request` (`VALIDATION_ERROR`).
+
+---
+
+### 2. `Idempotency-Key` Header Length & Character Bounds
+- **Previous behavior**: Accepted arbitrarily large headers without bounds (e.g. 5,000 characters).
+- **New behavior in [`src/schemas/paymentSchemas.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/src/schemas/paymentSchemas.ts#L41-L47) and [`src/routes/paymentRoutes.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/src/routes/paymentRoutes.ts#L17-L32)**:
+  - Enforces minimum length of 1 and maximum of **255 characters** (industry standard, preventing memory/DoS abuse).
+  - Enforces printable ASCII characters without whitespace (`^[\x21-\x7E]+$`).
+  - Rejects empty, whitespace-only, over-length (> 255 chars), or multi-header submissions with `400 Bad Request` (`VALIDATION_ERROR`).
+
+---
+
+### Test Suite & Documentation Verification
+Added 6 new automated tests in [`tests/payments.api.test.ts`](file:///Users/tayoadejuwon/Downloads/payment-assessment/tests/payments.api.test.ts#L199-L260):
+- `should return 400 Bad Request if currency does not consist of 3 alphabetical letters` ✅
+- `should return 400 Bad Request if currency is 3 letters but not a recognized ISO 4217 currency code` ✅
+- `should return 400 Bad Request if Idempotency-Key header exceeds 255 characters (e.g. 5000 characters)` ✅
+- `should return 400 Bad Request if Idempotency-Key header is empty or pure whitespace` ✅
+- `should return 400 Bad Request if Idempotency-Key header contains internal whitespace or spaces` ✅
+
+**All 101 tests passing** and pushed to GitHub: [`5777b99`](https://github.com/AdeoluX/paymemnt_assessment/commit/5777b99).
+
+---
+
+### 👤 User (Step 1278)
+*Time: 2026-10-23T12:39:18Z*
+
+the readMe examples look off. they don't match the actual responses
+
+---
+> 🛠️ *Actions taken (Step 1279):* `view_file`
+
+> 🛠️ *Actions taken (Step 1281):* `view_file`
+
+> 🛠️ *Actions taken (Step 1283):* `view_file`
+
+> 🛠️ *Actions taken (Step 1285):* `replace_file_content`
+
+> 🛠️ *Actions taken (Step 1287):* `run_command`
+
+> 🛠️ *Actions taken (Step 1289):* `run_command`
+
+
+### 🤖 Antigravity Assistant (Step 1291)
+*Time: 2026-10-23T12:41:51Z*
+
+I have updated the README examples to match the actual server response envelopes and ran the test suite to verify. Waiting for the test run to complete.
+
+---
+> 🛠️ *Actions taken (Step 1291):* `manage_task`
+
+> 🛠️ *Actions taken (Step 1293):* `schedule`
+
+
+### 🤖 Antigravity Assistant (Step 1295)
+*Time: 2026-10-23T12:42:10Z*
+
+The test suite is running in the background. Standing by for completion.
+
+---
+> 🛠️ *Actions taken (Step 1297):* `manage_task`
+
+> 🛠️ *Actions taken (Step 1299):* `view_file`
+
+> 🛠️ *Actions taken (Step 1302):* `run_command`
+
+> 🛠️ *Actions taken (Step 1304):* `schedule`
+
+> 🛠️ *Actions taken (Step 1307):* `view_file`
+
+> 🛠️ *Actions taken (Step 1309):* `replace_file_content`
+
+> 🛠️ *Actions taken (Step 1311):* `run_command`
+
+> 🛠️ *Actions taken (Step 1313):* `schedule`
+
+
+### 🤖 Antigravity Assistant (Step 1315)
+*Time: 2026-10-23T12:44:47Z*
+
+Waiting for `npm test` to finish.
+
+---
+> 🛠️ *Actions taken (Step 1317):* `manage_task`
+
+> 🛠️ *Actions taken (Step 1319):* `schedule`
+
+
+### 🤖 Antigravity Assistant (Step 1321)
+*Time: 2026-10-23T12:45:23Z*
+
+Continuing to wait for `npm test` completion.
+
+---
+> 🛠️ *Actions taken (Step 1324):* `run_command`
 
